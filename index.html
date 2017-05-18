@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html>
+<!----------------------------------------------------------------------------------------
+		RGB Color Temperature. VERSIÓN 0.1Alpha
+		Copyright (C) 2017 <davidiglesanchez@gmail.com>
+
+		This program is free software: you can redistribute it and/or modify
+		it under the terms of the GNU General Public License as published by
+		the Free Software Foundation, either version 3 of the License, or
+		(at your option) any later version.
+
+		This program is distributed in the hope that it will be useful,
+		but WITHOUT ANY WARRANTY; without even the implied warranty of
+		MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+		GNU General Public License for more details.
+
+		You should have received a copy of the GNU General Public License
+		along with this program.  If not, see <http://www.gnu.org/licenses/>
+---------------------------------------------------------------------------------------->
+	<head>
+	<title>RGB Color Temperature</title>
+	<script src="../DMX/socket.io.js"></script>
+	<script src="./cie.js" languaje="JavaScript"></script>
+		<script languaje="javascript">
+		/**
+		Configuration:
+		*/
+			var socket = io.connect('http://localhost:8080');
+			var Tminima = 900;
+			var Tmaxima = 90000;
+
+			var datosColor = [0,0,0,2, 1]; // R, G, B, GAMMA CORRECTION, brillo
+
+			var datosSalida = [0,0,0]; // R, G, B OUTPUT
+
+			var temperaturaActual = 2000;	// Current Temperature value
+
+		/**
+		FUNCTIONS:
+			enviar: send data to node.
+			constraint: constraint values.
+			mapear: fill "mapa" array with valid values to send.
+			getCode: maps the color led intensity to the code to send by serial port.
+			ponerR: set red value. Pass a number between 0 and 255.
+			ponerG: set green value. Pass a number between 0 and 255.
+			ponerB: set blue value. Pass a number between 0 and 255.
+			redondear: round a value to two decimals (example: float error)
+		*/
+			function enviar(data){
+				socket.emit('d',data);
+				document.getElementById("colorOUTvisual").style.backgroundColor="rgb("+parseInt(datosSalida[0])+","+parseInt(datosSalida[1])+","+parseInt(datosSalida[2])+")";
+			}
+
+			function constraint(a,b,c){
+				if(a<b){
+					return b;
+				}else if(a>c){
+					return c;
+				}else{
+					return a;
+				}
+			}
+
+
+			var mapa = [];
+			function mapear(){
+
+				for(var i = 0; i<=35; i++){
+					if(i<10){
+						mapa[i] = ""+i;
+					}else{
+						mapa[i] = String.fromCharCode(55+i);
+					}
+				}
+			}			
+
+			function getCode(value){
+				return mapa[parseInt(value/35)]+mapa[value%35];
+			}
+
+			function ponerR(value){
+				datosColor[0] = value; // Guardamos el color ROJO
+				//Evaluamos el brillo
+				value = parseInt(value*datosColor[4]);
+
+				value = constraint(value, 0, 255);
+				datosSalida[0] = gamma(value);
+				codigo = getCode(datosSalida[0]);
+
+				document.getElementById("Rinfo").innerHTML = value;
+				document.getElementById("RGinfo").innerHTML = gamma(value);
+				
+				enviar(codigo);
+			}
+
+			function ponerG(value){
+				datosColor[1] = value; // Guardamos el color VERDE
+				//Evaluamos el brillo
+				value = parseInt(value*datosColor[4]);
+
+				value = constraint(value, 0, 255);
+				datosSalida[1] = gamma(value);
+				codigo = getCode(512+gamma(value));
+				document.getElementById("Ginfo").innerHTML = value;
+				document.getElementById("GGinfo").innerHTML = gamma(value);
+				
+				enviar(codigo);
+			}
+
+			function ponerB(value){
+				datosColor[2] = value; //Guardamos el color AZUL
+
+				//Evaluamos el brillo
+				value = parseInt(value*datosColor[4]);
+
+				value = constraint(value, 0, 255);
+				datosSalida[2] = gamma(value);
+				codigo = getCode(256+gamma(value));
+				document.getElementById("Binfo").innerHTML = value;
+				document.getElementById("BGinfo").innerHTML = gamma(value);
+				
+				enviar(codigo);
+			}
+
+			function redondear(valor){
+				return Math.round(valor*100)/100;
+			}
+
+			function gamma(value){
+
+				return parseInt(Math.pow(value/255, datosColor[3])*255);
+			}
+
+			function actualizarTodo(){
+				ponerR(datosColor[0]);
+				ponerG(datosColor[1]);
+				ponerB(datosColor[2]);
+				dibuja_radiancia_a_temperatura(temperaturaActual);
+
+			}
+
+			function ponerGamma(valor){
+				datosColor[3] = valor;
+				document.getElementById("Gammainfo").innerHTML = redondear(valor);
+				actualizarTodo();
+			}
+
+			function ponerBrillo(valor){
+				datosColor[4] = valor;
+				document.getElementById("Brilloinfo").innerHTML = redondear(valor);
+				actualizarTodo();
+			}
+
+
+			function colorTemperatura(T){
+				if(T<=Tminima){T = Tminima;}
+				temperaturaActual = T;
+				var datosBrutos = radiance_at_temperature_visible(T);
+				var radiancia = radiancia_rgb_desde_datos(datosBrutos);
+				dibuja_radiancia_con_datos(datosBrutos);
+				ponerR(radiancia[0]*255);
+				ponerG(radiancia[1]*255);
+				ponerB(radiancia[2]*255);
+				document.getElementById("Tempinfo").innerHTML = T+"K";
+			}
+
+			function calientate(T){
+				if(T<10000){
+					T+=200;
+					colorTemperatura(T);
+					setTimeout("calientate("+T+")", 200);
+				}
+
+			}
+
+			var botando = 0;
+			function bota(T){
+				if(botando == 0){
+					T+=50;
+					colorTemperatura(T);
+
+					if(T>=6000){botando = 1;}
+					setTimeout("bota("+T+")", 200);
+				}else if(botando == 1){
+					T-=50;
+					colorTemperatura(T);
+					if(T<=3500){botando = 2;}
+					setTimeout("bota("+T+")", 200);
+				}
+				if(botando == 2){botando = 0;}
+
+			}
+
+			var gammaCorrectionVariable = 0;
+			function gammaCorrection(i){
+				if(gammaCorrectionVariable == 0){
+					i+=10;
+					
+
+					if(i>=255){gammaCorrectionVariable = 1;}
+				}else{
+					i-=10;
+					if(i<=0){gammaCorrectionVariable = 0;}
+					
+				}
+				ponerR(i);
+				ponerG(i);
+				ponerB(i);
+				setTimeout("gammaCorrection("+i+")", 200);
+				
+
+			}
+
+
+			function botaGamma(i){
+				if(gammaCorrectionVariable == 0){
+					i+=0.1;
+					
+
+					if(i>=3){gammaCorrectionVariable = 1;}
+				}else{
+					i-=0.1;
+					if(i<=1){gammaCorrectionVariable = 0;}
+					
+				}
+				console.log("Gamma:"+i);
+				ponerGamma(i);
+				setTimeout("botaGamma("+i+")", 200);
+				
+
+			}
+
+			function apagar(){
+				ponerR(0);
+				ponerG(0);
+				ponerB(0);
+				
+			}
+			/**
+			CALCULADOR DE RADIANCIAS!
+			*/
+
+
+
+			var h = 6.62606896e-34;	//Js
+			var pi = 3.141592654;
+			var c = 299792458;		// m/s
+			var k = 1.38064852e-23; // J/K
+
+			var A = 8.0*pi*h*c;
+			var B = h*c/k;
+			var wavelength = [623, 527.5, 466];		// R, G, B in meters for LED
+
+
+			function gammaSRGB(value){
+				if(value<0.0031308){
+					return 12.92*value;
+				}else{
+					return (1.055*Math.pow(value,1/2.4)-0.055);
+				}
+			}
+
+			function radiancia_rgb_a_T(T){
+
+				return radiancia_rgb_desde_datos(radiance_at_temperature_visible(T));
+
+			}
+
+
+			function radiancia_rgb_desde_datos(data){
+
+				
+				var datos = CIEtoRGB(evaluarIntegralColor(data));
+
+				var maximun = obtenerMaximo(datos);
+				// Low temperature aproximation
+				var maxWavelength = 2898000/temperaturaActual;
+				if(maxWavelength>wavelength[0]){
+					// GET MAXIMUN WAVELENGTH / RED WAVELENGTH:
+
+					maximun *= radiance_at_temperature_wavelength(temperaturaActual, maxWavelength)/radiance_at_temperature_wavelength(temperaturaActual, wavelength[0]);
+				}
+				return [datos[0]/maximun, datos[1]/maximun, datos[2]/maximun];
+
+			}
+
+			function radiance_at_temperature_percent(T, lambda){
+				
+				var denominator = Math.pow(lambda,5)*(Math.exp(B/(lambda*T))-1);
+				return (A/denominator);
+				
+			}
+
+			function obtenerMaximo(valores){
+				var maximo = valores[0];
+				for(var i = 0; i<valores.length; i++){
+					if(valores[i]>maximo){maximo = valores[i];}
+				}
+				return maximo;
+			}
+
+			function wavelengthToColor(valor){
+				var hue = (valor>527.5)? 1.25654450261780*(623-valor) : 1.95121951219512*(527.5-valor)+120;
+				hue = constraint(hue, 0, 350);
+				return 'hsl('+parseInt(hue)+', 100%, 50%)';
+
+			}
+
+
+
+			function evaluarIntegralColor(datos){
+				
+				var integralX = 0;
+				var integralY = 0;
+				var integralZ = 0;
+				for(var i = 0; i<=440; i++){
+					integralX +=__x[i]*datos[i];
+					integralY +=__y[i]*datos[i];
+					integralZ +=__z[i]*datos[i];
+				}
+
+				// Se normalizan los datos
+				var x = integralX/(integralX+integralY+integralZ);
+				var y = integralY/(integralX+integralY+integralZ);
+				var z = integralZ/(integralX+integralY+integralZ);
+				return [x, y, z];
+				
+			}
+
+			function CIEtoRGB(cieValor){
+				var x = cieValor[0];
+
+				return [constraint(gammaSRGB(cieValor[0]*3.2406-cieValor[1]*1.5372-cieValor[2]*0.4986), 0, 1),
+						constraint(gammaSRGB(-cieValor[0]*0.9689+cieValor[1]*1.8758+cieValor[2]*0.0415), 0, 1),
+						constraint(gammaSRGB(cieValor[0]*0.0557-cieValor[1]*0.2040+cieValor[2]*1.0570), 0, 1)];
+			}
+
+
+			function dibuja_radiancia_a_temperatura(T){
+				dibuja_radiancia_con_datos(radiance_at_temperature_visible(T));
+			}
+
+			function dibuja_radiancia_con_datos(datosBrutos){
+				var ctx = document.getElementById("grafica_radiancia").getContext("2d");
+				ctx.clearRect(0,0, 442, 200);
+
+				var valorEscala = 200/obtenerMaximo(datosBrutos);
+				
+				
+
+				var gradient = ctx.createLinearGradient(0,0, 442, 0);
+
+				for(var i = 0; i<=440; i++){
+					gradient.addColorStop(1-i/440, wavelengthToColor(i+390));
+
+				}
+
+				ctx.beginPath();
+
+				ctx.moveTo(442, 200-datosBrutos[0]*valorEscala);
+				for(var i = 0; i<datosBrutos.length; i++){
+					ctx.lineTo(442-i, 200-datosBrutos[i]*valorEscala);
+					ctx.strokeStyle=wavelengthToColor(i);
+				}
+				ctx.strokeStyle = gradient;
+				ctx.lineWidth = 3;
+				ctx.stroke();
+
+				//Obtener líneas RGB:
+
+				wavelength
+				var datosRGB = radiancia_rgb_desde_datos(datosBrutos);
+				ctx.beginPath();
+				ctx.strokeStyle = gradient;
+				//Valores lineales
+				ctx.rect(830-wavelength[0],200-datosRGB[0]*200, 3, datosRGB[0]*200);
+				ctx.rect(830-wavelength[1],200-datosRGB[1]*200, 3, datosRGB[1]*200);
+				ctx.rect(830-wavelength[2],200-datosRGB[2]*200, 3, datosRGB[2]*200);
+				//Valores con Gamma
+				
+				var gammaCorrected = [gamma(datosRGB[0]*255)/255, gamma(datosRGB[1]*255)/255, gamma(datosRGB[2]*255)/255];
+				console.log(datosRGB);
+				ctx.rect(838-wavelength[0],200-gammaCorrected[0]*200, 3, gammaCorrected[0]*200);
+				ctx.rect(838-wavelength[1],200-gammaCorrected[1]*200, 3, gammaCorrected[1]*200);
+				ctx.rect(838-wavelength[2],200-gammaCorrected[2]*200, 3, gammaCorrected[2]*200);
+
+				ctx.stroke();
+			}
+
+			/**
+			Funcion: radiance_at_temperature_visible
+				Dada una temperatura T, devuelve los valores visibles de
+				intensidad para longitudes de onda comprendidos entre los 390nm
+				y los 830 nm
+			*/
+
+			function radiance_at_temperature_visible(T){
+				
+				var datosVisibles = [];
+				var denominator;
+				var lambda;
+				for(var i = 390; i<=830; i++){
+					lambda = i*1e-9;
+					denominator = Math.pow(lambda,5)*(Math.exp(B/(lambda*T))-1);
+					datosVisibles[i-390] = (A/denominator);
+				}
+				return datosVisibles;
+				
+			}
+
+			/**
+			Funcion: radiance_at_temperature_wavelength
+				Dada una temperatura T y una longitud de onda, devuelve el valor de radiancia.
+				@params:
+					T: Temperatura en Kelvin
+					lambda: longitud de onda en nanómetros
+
+			*/
+
+			function radiance_at_temperature_wavelength(T, lambda){ // KELVIN / NANOMETERS
+				
+				
+					lambda = lambda*1e-9;
+					denominator = Math.pow(lambda,5)*(Math.exp(B/(lambda*T))-1);
+					return (A/denominator);
+¡
+				
+			}
+
+			window.onload = function(){
+				mapear();
+				colorTemperatura(temperaturaActual);
+				document.body.addEventListener("keydown", function(e){ 
+					switch(e.keyCode){
+						case 37:
+							colorTemperatura(temperaturaActual-=100);
+						break;
+						case 39:
+							colorTemperatura(temperaturaActual+=100);
+						break;
+						case 38:
+							ponerBrillo(constraint(datosColor[4]+0.05, 0, 1));
+						break;
+						case 40:
+							ponerBrillo(constraint(datosColor[4]+0.05, 0, 1));
+						break;
+						case 65:
+							apagar();
+						break;
+					}
+					//console.log(e.keyCode);
+				});
+				document.getElementById("Tvalor").addEventListener("keyup", function(){
+					if(document.getElementById("Tvalor").value>Tminima && document.getElementById("Tvalor").value<Tmaxima){
+						colorTemperatura(document.getElementById("Tvalor").value);
+					}
+				});
+				document.getElementById("Treducir").addEventListener("click", function(){
+					colorTemperatura(temperaturaActual-=100);
+				});
+				document.getElementById("Taumentar").addEventListener("click", function(){
+					colorTemperatura(temperaturaActual+=100);
+				});
+				document.getElementById("Breducir").addEventListener("click", function(){
+					ponerBrillo(constraint(datosColor[4]-0.05, 0, 1));
+				});
+				document.getElementById("Baumentar").addEventListener("click", function(){
+					ponerBrillo(constraint(datosColor[4]+0.05, 0, 1));
+				});
+				document.getElementById("Greducir").addEventListener("click", function(){
+					ponerGamma(datosColor[3]-0.05);
+				});
+				document.getElementById("Gaumentar").addEventListener("click", function(){
+					ponerGamma(datosColor[3]+0.05);
+				});
+				document.getElementById("apagar").addEventListener("click", function(){
+					apagar();
+				});
+			}
+		</script>
+		<style type="text/css">
+		#grafica {
+			position:relative;
+			height:225px;
+		}
+		#grafica canvas{
+			position:absolute;
+			top:0px;
+			left:50px;
+			width:442px;
+			height:200px;
+			border:1px solid #000000;
+		}
+		#grafica #xlabel {
+			position:absolute;
+			bottom:0px;
+			left:200px;
+		}
+		#grafica #ylabel {
+			position:absolute;
+			left:0px;
+			top:100px;
+			transform: rotate(-90deg);
+		}
+		#control {
+			padding-top:50px;
+			text-align: center;
+		}
+
+		</style>
+	</head>
+	<body>
+
+		<table border="0">
+			<tr><td>Canal</td><td>Lineal</td><td>Salida</td><td>Color:</td></tr>
+			<tr><td>R</td><td id="Rinfo">-</td><td id="RGinfo">-</td><td id="colorOUTvisual"></td></tr>
+			<tr><td>G</td><td id="Ginfo">-</td><td id="GGinfo">-</td></tr>
+			<tr><td>B</td><td id="Binfo">-</td><td id="BGinfo">-</td></tr>
+			<tr><td>gamma</td><td id="Gammainfo">2</td></tr>
+			<tr><td>Brillo</td><td id="Brilloinfo">1</td></tr>
+			<tr><td>Temp</td><td id="Tempinfo">-K</td></tr>
+		</table>
+		<div id="grafica">
+			<span id="ylabel">Radiancia</span>
+			<span id="xlabel">Longitud de onda</span>
+			<canvas id="grafica_radiancia" width="442" height="200"></canvas>
+		</div>
+		<div id="control">
+			<table border="0">
+				<tr>
+					<td>Temperatura</td>
+					<td colspan="2">Temperatura</td>
+					<td colspan="2">Brillo</td>
+					<td colspan="2">Gamma</td>
+				</tr>
+				<tr>
+					<td><input type="text" value="2000" id="Tvalor">K</td>
+					<td><input type="button" value="-" id="Treducir"></td>
+					<td><input type="button" value="+" id="Taumentar"></td>
+					<td><input type="button" value="-" id="Breducir"></td>
+					<td><input type="button" value="+" id="Baumentar"></td>
+					<td><input type="button" value="-" id="Greducir"></td>
+					<td><input type="button" value="+" id="Gaumentar"></td>
+					<td><input type="button" value="Apagar" id="apagar"></td>
+				</tr>
+			</table>
+		</div>
+	</body>
+</html>
